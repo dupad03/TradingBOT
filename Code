@@ -1,0 +1,63 @@
+import alpaca_trade_api as tradeapi
+import pandas as pd
+
+api = tradeapi.REST('<APCA-API-KEY-ID>', '<APCA-API-SECRET-KEY>', base_url='https://paper-api.alpaca.markets')
+
+symbol = 'AAPL'
+shares_to_trade = 1
+
+barset = api.get_barset(symbol, 'day', limit=21)
+
+closing_prices = [bar.c for bar in barset[symbol]]
+df = pd.DataFrame(closing_prices, columns=['price'])
+df['moving_average'] = df['price'].rolling(window=20).mean()
+latest_closing_price = df['price'].iloc[-1]
+latest_moving_average = df['moving_average'].iloc[-1]
+
+position = None
+try:
+    position = api.get_position(symbol)
+except Exception as e:
+    print(f"No position in {symbol}.")
+
+account = api.get_account()
+
+max_investment = 0.02
+max_stock_value = float(account.equity) * max_investment
+
+latest_quote = api.get_last_trade(symbol)
+latest_price = latest_quote.price
+
+max_qty_to_buy = int(max_stock_value / latest_price)
+
+qty_to_sell = position.qty if position else 0
+
+try:
+    if latest_closing_price < latest_moving_average:
+        if max_qty_to_buy > 0:
+            order = api.submit_order(
+                symbol=symbol,
+                qty=min(shares_to_trade, max_qty_to_buy),
+                side='buy',
+                type='market',
+                time_in_force='gtc'
+            )
+            print(f'Placed a buy order with id {order.id}.')
+        else:
+            print('Not enough buying power to execute buy order.')
+    elif latest_closing_price > latest_moving_average:
+        if position and qty_to_sell > 0:
+            order = api.submit_order(
+                symbol=symbol,
+                qty=min(shares_to_trade, qty_to_sell),
+                side='sell',
+                type='market',
+                time_in_force='gtc'
+            )
+            print(f'Placed a sell order with id {order.id}.')
+        else:
+            print('No existing position to sell.')
+    else:
+        print('No action taken.')
+except Exception as e:
+    print(f'An error occurred while attempting to place an order: {e}')
